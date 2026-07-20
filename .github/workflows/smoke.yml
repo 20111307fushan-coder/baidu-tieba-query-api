@@ -1,0 +1,70 @@
+name: Production smoke test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Wait for Render and test API
+        env:
+          BASE_URL: https://baidu-tieba-query-api.onrender.com
+        run: |
+          python - <<'PY'
+          import json
+          import time
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          base = "https://baidu-tieba-query-api.onrender.com"
+
+          def get(path, params=None, attempts=1):
+              url = base + path
+              if params:
+                  url += "?" + urllib.parse.urlencode(params)
+              last = None
+              for attempt in range(attempts):
+                  try:
+                      with urllib.request.urlopen(url, timeout=40) as response:
+                          return response.status, json.load(response)
+                  except Exception as exc:
+                      last = exc
+                      if attempt + 1 < attempts:
+                          time.sleep(15)
+              raise last
+
+          status, health = get("/health", attempts=24)
+          assert status == 200 and health == {"status": "ok"}, health
+
+          status, spec = get("/openapi.json")
+          assert status == 200
+          required = {
+              "/api/v1/search",
+              "/api/v1/users/{username}/threads",
+              "/api/v1/threads/{tid}",
+          }
+          assert required.issubset(spec["paths"]), spec["paths"].keys()
+
+          status, search = get(
+              "/api/v1/search",
+              {"forum": "败犬女主太多了", "keyword": "甘夏", "limit": 5},
+          )
+          assert status == 200 and "items" in search, search
+
+          status, thread = get("/api/v1/threads/8537603600")
+          assert status == 200
+          for field in ("title", "author", "tid", "forum", "url", "body", "posts"):
+              assert field in thread, (field, thread)
+
+          print(json.dumps({
+              "health": health,
+              "search_results": len(search["items"]),
+              "thread_tid": thread["tid"],
+              "thread_title": thread["title"],
+          }, ensure_ascii=False))
+          PY
