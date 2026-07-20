@@ -9,8 +9,22 @@
 - `GET /api/v1/threads/{tid}?max_pages=1&page_size=30`
 - `GET /health`
 - Swagger 文档：`GET /docs`
+- MCP Streamable HTTP：`POST /mcp`
 
 所有帖子结果均包含标题、作者、tid、贴吧直达链接和正文。按 tid 查询还返回各楼层；将 `max_pages` 调高可继续读取回帖，最高 20 页。
+
+## ChatGPT MCP App
+
+在 ChatGPT Developer Mode 中连接：
+
+```text
+https://baidu-tieba-query-api.onrender.com/mcp
+```
+
+提供四个只读工具：`search_tieba`、`get_user_threads`、`read_thread` 和
+`read_thread_page`。`read_thread` 默认自动读取最多 100 页；超长帖子会返回
+`complete=false` 与 `next_page`，再由 `read_thread_page` 续读至
+`has_more=false`。
 
 ## 安全配置
 
