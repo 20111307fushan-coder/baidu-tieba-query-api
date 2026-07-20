@@ -50,7 +50,7 @@ async def fake_client():
 
 
 main._client = fake_client
-client = TestClient(main.app)
+client = TestClient(main.rest_app)
 
 
 def test_health():
@@ -67,6 +67,7 @@ def test_user_threads():
     data = client.get("/api/v1/users/tester/threads").json()
     assert data["items"][0]["tid"] == 456
     assert data["items"][0]["author"] == "tester"
+    assert data["has_more"] is True
 
 
 def test_thread():
@@ -74,3 +75,5 @@ def test_thread():
     assert data["title"] == "完整主题"
     assert data["body"] == "完整正文"
     assert data["posts"][0]["floor"] == 1
+    assert data["complete"] is True
+    assert data["next_page"] is None
