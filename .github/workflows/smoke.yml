@@ -23,6 +23,10 @@ jobs:
 
           base = "https://baidu-tieba-query-api.onrender.com"
 
+          # A push starts this workflow and a Render auto-deploy at the same time.
+          # Let Render finish swapping instances before checking application routes.
+          time.sleep(120)
+
           def get(path, params=None, attempts=1):
               url = base + path
               if params:
@@ -46,7 +50,7 @@ jobs:
           status, health = get("/health", attempts=24)
           assert status == 200 and health == {"status": "ok"}, health
 
-          status, spec = get("/openapi.json")
+          status, spec = get("/openapi.json", attempts=12)
           assert status == 200
           required = {
               "/api/v1/search",
@@ -58,11 +62,11 @@ jobs:
           status, search = get(
               "/api/v1/search",
               {"forum": "败犬女主太多了", "keyword": "甘夏", "limit": 5},
-              attempts=3,
+              attempts=12,
           )
           assert status == 200 and "items" in search, search
 
-          status, thread = get("/api/v1/threads/8537603600")
+          status, thread = get("/api/v1/threads/8537603600", attempts=12)
           assert status == 200
           for field in ("title", "author", "tid", "forum", "url", "body", "posts"):
               assert field in thread, (field, thread)
