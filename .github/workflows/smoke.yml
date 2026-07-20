@@ -65,16 +65,27 @@ jobs:
               attempts=12,
           )
           assert status == 200 and "items" in search, search
+          assert search["items"], "贴吧搜索成功，但本次没有结果"
 
-          status, thread = get("/api/v1/threads/8537603600", attempts=12)
+          target = search["items"][0]
+          status, thread = get(f"/api/v1/threads/{target['tid']}", attempts=12)
           assert status == 200
           for field in ("title", "author", "tid", "forum", "url", "body", "posts"):
               assert field in thread, (field, thread)
+
+          username = urllib.parse.quote(target["author"], safe="")
+          status, user_threads = get(
+              f"/api/v1/users/{username}/threads",
+              attempts=12,
+          )
+          assert status == 200 and "items" in user_threads, user_threads
 
           print(json.dumps({
               "health": health,
               "search_results": len(search["items"]),
               "thread_tid": thread["tid"],
               "thread_title": thread["title"],
+              "tested_author": target["author"],
+              "user_thread_results": len(user_threads["items"]),
           }, ensure_ascii=False))
           PY
