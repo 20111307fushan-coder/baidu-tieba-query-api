@@ -32,8 +32,13 @@ jobs:
                   try:
                       with urllib.request.urlopen(url, timeout=40) as response:
                           return response.status, json.load(response)
+                  except urllib.error.HTTPError as exc:
+                      body = exc.read().decode("utf-8", errors="replace")
+                      last = RuntimeError(f"GET {url} -> HTTP {exc.code}: {body}")
+                      if attempt + 1 < attempts:
+                          time.sleep(15)
                   except Exception as exc:
-                      last = exc
+                      last = RuntimeError(f"GET {url} failed: {exc}")
                       if attempt + 1 < attempts:
                           time.sleep(15)
               raise last
@@ -53,6 +58,7 @@ jobs:
           status, search = get(
               "/api/v1/search",
               {"forum": "败犬女主太多了", "keyword": "甘夏", "limit": 5},
+              attempts=3,
           )
           assert status == 200 and "items" in search, search
 
