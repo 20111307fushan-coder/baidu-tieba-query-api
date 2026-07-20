@@ -1,4 +1,4 @@
-name: Production smoke test
+name: Production MCP smoke test
 
 on:
   push:
@@ -8,84 +8,108 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Wait for Render and test API
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install MCP client
+        run: pip install "mcp==1.28.1"
+
+      - name: Wait for Render and test MCP tools
         env:
-          BASE_URL: https://baidu-tieba-query-api.onrender.com
+          MCP_URL: https://baidu-tieba-query-api.onrender.com/mcp
         run: |
           python - <<'PY'
+          import asyncio
           import json
+          import os
           import time
-          import urllib.error
-          import urllib.parse
-          import urllib.request
 
-          base = "https://baidu-tieba-query-api.onrender.com"
+          from mcp import ClientSession
+          from mcp.client.streamable_http import streamable_http_client
 
-          # A push starts this workflow and a Render auto-deploy at the same time.
-          # Let Render finish swapping instances before checking application routes.
-          time.sleep(120)
+          URL = os.environ["MCP_URL"]
 
-          def get(path, params=None, attempts=1):
-              url = base + path
-              if params:
-                  url += "?" + urllib.parse.urlencode(params)
+          def data(result):
+              if result.isError:
+                  raise AssertionError(result)
+              if result.structuredContent is not None:
+                  return result.structuredContent
+              return json.loads(result.content[0].text)
+
+          async def connect_and_test():
+              async with streamable_http_client(URL) as (read, write, _):
+                  async with ClientSession(read, write) as session:
+                      await session.initialize()
+                      listed = await session.list_tools()
+                      names = {tool.name for tool in listed.tools}
+                      required = {
+                          "search_tieba", "get_user_threads",
+                          "read_thread", "read_thread_page",
+                      }
+                      assert required <= names, names
+
+                      search = data(await session.call_tool("search_tieba", {
+                          "forum": "败犬女主太多了", "keyword": "甘夏",
+                          "page": 1, "limit": 30,
+                      }))
+                      assert search["items"], search
+
+                      user = data(await session.call_tool("get_user_threads", {
+                          "username": "zyshan12", "page": 1,
+                      }))
+                      assert "items" in user and "has_more" in user, user
+
+                      tid = 10254103055
+                      thread = data(await session.call_tool("read_thread", {
+                          "tid": tid, "max_pages": 20, "page_size": 30,
+                      }))
+                      chunks = [thread]
+                      while thread["has_more"]:
+                          assert thread["next_page"] is not None, thread
+                          thread = data(await session.call_tool("read_thread_page", {
+                              "tid": tid, "start_page": thread["next_page"],
+                              "max_pages": 20, "page_size": 30,
+                          }))
+                          chunks.append(thread)
+                          assert len(chunks) <= 100, "pagination did not terminate"
+
+                      posts = [post for chunk in chunks for post in chunk["posts"]]
+                      bodies = [post["body"] for post in posts if post["body"].strip()]
+                      assert thread["has_more"] is False and thread["complete"] is True
+                      assert chunks[0]["tid"] == tid
+                      assert chunks[0]["title"] and chunks[0]["author"]
+                      assert chunks[0]["url"].endswith(str(tid))
+                      assert chunks[0]["body"].strip() and bodies
+
+                      print(json.dumps({
+                          "tools": sorted(names),
+                          "search_results": len(search["items"]),
+                          "zyshan12_threads_page_1": len(user["items"]),
+                          "tid": tid,
+                          "title": chunks[0]["title"],
+                          "author": chunks[0]["author"],
+                          "pages_fetched": sum(c["pages_fetched"] for c in chunks),
+                          "posts_with_body": len(bodies),
+                          "complete": thread["complete"],
+                          "body_preview": bodies[0][:120],
+                      }, ensure_ascii=False))
+
+          async def main():
+              # Render deploy and free-instance cold starts can take several minutes.
               last = None
-              for attempt in range(attempts):
+              time.sleep(120)
+              for attempt in range(24):
                   try:
-                      with urllib.request.urlopen(url, timeout=40) as response:
-                          return response.status, json.load(response)
-                  except urllib.error.HTTPError as exc:
-                      body = exc.read().decode("utf-8", errors="replace")
-                      last = RuntimeError(f"GET {url} -> HTTP {exc.code}: {body}")
-                      if attempt + 1 < attempts:
-                          time.sleep(15)
+                      await connect_and_test()
+                      return
                   except Exception as exc:
-                      last = RuntimeError(f"GET {url} failed: {exc}")
-                      if attempt + 1 < attempts:
-                          time.sleep(15)
+                      last = exc
+                      print(f"attempt {attempt + 1} failed: {exc}")
+                      await asyncio.sleep(15)
               raise last
 
-          status, health = get("/health", attempts=24)
-          assert status == 200 and health == {"status": "ok"}, health
-
-          status, spec = get("/openapi.json", attempts=12)
-          assert status == 200
-          required = {
-              "/api/v1/search",
-              "/api/v1/users/{username}/threads",
-              "/api/v1/threads/{tid}",
-          }
-          assert required.issubset(spec["paths"]), spec["paths"].keys()
-
-          status, search = get(
-              "/api/v1/search",
-              {"forum": "败犬女主太多了", "keyword": "甘夏", "limit": 5},
-              attempts=12,
-          )
-          assert status == 200 and "items" in search, search
-          assert search["items"], "贴吧搜索成功，但本次没有结果"
-
-          target = search["items"][0]
-          status, thread = get(f"/api/v1/threads/{target['tid']}", attempts=12)
-          assert status == 200
-          for field in ("title", "author", "tid", "forum", "url", "body", "posts"):
-              assert field in thread, (field, thread)
-
-          username = urllib.parse.quote(target["author"], safe="")
-          status, user_threads = get(
-              f"/api/v1/users/{username}/threads",
-              attempts=12,
-          )
-          assert status == 200 and "items" in user_threads, user_threads
-
-          print(json.dumps({
-              "health": health,
-              "search_results": len(search["items"]),
-              "thread_tid": thread["tid"],
-              "thread_title": thread["title"],
-              "tested_author": target["author"],
-              "user_thread_results": len(user_threads["items"]),
-          }, ensure_ascii=False))
+          asyncio.run(main())
           PY
