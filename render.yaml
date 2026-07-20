@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: baidu-tieba-query-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: RATE_LIMIT_PER_MINUTE
+        value: 60
+      - key: TIEBA_REQUEST_TIMEOUT
+        value: 20
