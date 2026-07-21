@@ -11,6 +11,7 @@ import aiotieba
 from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict
 from starlette.routing import Mount
@@ -276,6 +277,17 @@ mcp = FastMCP(
     stateless_http=True,
     json_response=True,
     streamable_http_path="/mcp",
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[
+            "baidu-tieba-query-api.onrender.com",
+            "baidu-tieba-query-api.onrender.com:*",
+        ],
+        allowed_origins=[
+            "https://chatgpt.com",
+            "https://chat.openai.com",
+        ],
+    ),
 )
 
 
